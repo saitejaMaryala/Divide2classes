@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ImageTag — Image Annotation Tool</title>
+  <meta name="description" content="A fast, keyboard-friendly image annotation tool for classifying images into custom categories." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <!-- ─── LOADING OVERLAY ─── -->
+  <div id="loading-overlay" class="loading-overlay hidden">
+    <div class="spinner"></div>
+    <p>Loading...</p>
+  </div>
+
+  <!-- ─── TOAST ─── -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- ─── HEADER ─── -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">⬡</span>
+        <span class="logo-text">ImageTag</span>
+      </div>
+    </div>
+    <div class="header-center" id="header-status" style="display:none;">
+      <div class="progress-wrap">
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progress-bar"></div>
+        </div>
+        <span class="progress-label" id="progress-label">0 / 0</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-ghost" id="btn-view-dashboard" style="display:none;" title="Switch to dashboard grid view">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </button>
+      <button class="btn btn-ghost" id="btn-view-annotate" style="display:none;" title="Switch to annotation view">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        Annotate
+      </button>
+      <button class="btn btn-ghost" id="btn-export" style="display:none;" title="Export annotations JSON">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Export
+      </button>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!--                  SETUP SCREEN                  -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <main id="screen-setup" class="screen screen-setup active">
+    <div class="setup-hero">
+      <div class="setup-glow"></div>
+      <div class="hero-badge">Image Annotation Tool</div>
+      <h1 class="hero-title">Label images<br /><span class="gradient-text">blazingly fast.</span></h1>
+      <p class="hero-sub">Point to a folder. Assign classes. Export JSON. Done.</p>
+
+      <div class="setup-card">
+        <label class="input-label" for="folder-path">Image Folder Path</label>
+        <div class="input-row">
+          <input
+            type="text"
+            id="folder-path"
+            class="text-input"
+            placeholder="/home/user/my_images"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="btn btn-primary" id="btn-load" onclick="loadFolder()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Load
+          </button>
+        </div>
+        <p class="input-hint">Supported formats: JPG, JPEG, PNG, BMP, GIF, TIFF, WebP</p>
+        <p id="setup-error" class="error-msg hidden"></p>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature-card">
+          <span class="feature-icon">⌨️</span>
+          <strong>Keyboard Shortcuts</strong>
+          <span>Number keys for classes, arrows to navigate</span>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">💾</span>
+          <strong>Auto-Save</strong>
+          <span>Annotations saved to JSON in your folder</span>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">📊</span>
+          <strong>Dashboard View</strong>
+          <span>See annotated vs unannotated at a glance</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!--               ANNOTATION SCREEN                -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <main id="screen-annotate" class="screen screen-annotate hidden">
+    <div class="annotate-layout">
+
+      <!-- Left panel -->
+      <aside class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-label">Image</div>
+          <div class="image-meta" id="image-meta">
+            <span class="meta-name" id="meta-filename">—</span>
+            <span class="meta-index" id="meta-index">—</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-label">Current Class</div>
+          <div class="current-class-badge" id="current-class-badge">
+            <span id="current-class-text">Unassigned</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-label-row">
+            <div class="sidebar-label">Classes</div>
+            <span class="shortcut-hint">Press 1–9</span>
+          </div>
+          <div class="class-list" id="class-list"></div>
+          <div class="add-class-wrap">
+            <input
+              type="text"
+              id="new-class-input"
+              class="text-input text-input-sm"
+              placeholder="New class name…"
+              onkeydown="handleNewClassKey(event)"
+            />
+            <button class="btn btn-accent btn-sm" onclick="addClass()">Add</button>
+          </div>
+        </div>
+
+        <div class="sidebar-section sidebar-actions">
+          <button class="btn btn-danger-ghost btn-sm full-width" id="btn-unannotate" onclick="unannotateImage()" style="display:none;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            Remove Label
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main image area -->
+      <div class="image-viewport">
+        <div class="image-container" id="image-container">
+          <img id="main-image" class="main-image" src="" alt="Current image" />
+          <div class="image-overlay hidden" id="image-overlay">
+            <span class="overlay-class" id="overlay-class"></span>
+          </div>
+        </div>
+
+        <!-- Nav buttons -->
+        <div class="nav-buttons">
+          <button class="nav-btn" id="btn-prev" onclick="navigate('prev')" title="Previous (←)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+            Prev
+          </button>
+          <div class="nav-counter" id="nav-counter">— / —</div>
+          <button class="nav-btn" id="btn-next" onclick="navigate('next')" title="Next (→)">
+            Next
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Keyboard shortcuts bar -->
+    <div class="shortcuts-bar">
+      <span><kbd>←</kbd><kbd>→</kbd> Navigate</span>
+      <span><kbd>1</kbd>–<kbd>9</kbd> Assign Class</span>
+      <span><kbd>Enter</kbd> Next Unannotated</span>
+      <span><kbd>Del</kbd> Remove Label</span>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <!--               DASHBOARD SCREEN                 -->
+  <!-- ═══════════════════════════════════════════════ -->
+  <main id="screen-dashboard" class="screen screen-dashboard hidden">
+    <div class="dashboard-header">
+      <div class="dash-stats" id="dash-stats"></div>
+      <button class="btn btn-primary" id="btn-start" onclick="startAnnotating()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+        Start / Resume
+      </button>
+    </div>
+
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="all" onclick="filterDashboard('all', this)">All</button>
+      <button class="filter-btn" data-filter="annotated" onclick="filterDashboard('annotated', this)">Annotated</button>
+      <button class="filter-btn" data-filter="unannotated" onclick="filterDashboard('unannotated', this)">Unannotated</button>
+    </div>
+
+    <div class="image-grid" id="image-grid"></div>
+
+    <div class="empty-state hidden" id="dash-empty">
+      <span class="empty-icon">✅</span>
+      <p>All images annotated!</p>
+    </div>
+  </main>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

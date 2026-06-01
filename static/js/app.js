@@ -48,6 +48,7 @@ const DOM = {
     btnDashboard:  $('btn-view-dashboard'),
     btnAnnotate:   $('btn-view-annotate'),
     btnExport:     $('btn-export'),
+    btnClassViewer: $('btn-class-viewer'),
   },
   setup: {
     folderInput: $('folder-path'),
@@ -128,10 +129,11 @@ function showScreen(name) {
   });
 
   const loaded = AppState.loaded;
-  DOM.header.btnDashboard.style.display = (loaded && name !== 'dashboard') ? '' : 'none';
-  DOM.header.btnAnnotate.style.display  = (loaded && name !== 'annotate')  ? '' : 'none';
-  DOM.header.btnExport.style.display    = loaded ? '' : 'none';
-  DOM.header.status.style.display       = loaded ? '' : 'none';
+  DOM.header.btnDashboard.style.display    = (loaded && name !== 'dashboard') ? '' : 'none';
+  DOM.header.btnAnnotate.style.display     = (loaded && name !== 'annotate')  ? '' : 'none';
+  DOM.header.btnExport.style.display       = loaded ? '' : 'none';
+  DOM.header.btnClassViewer.style.display  = loaded ? '' : 'none';
+  DOM.header.status.style.display          = loaded ? '' : 'none';
 }
 
 /* ─────────────────────────────────────────
@@ -786,3 +788,158 @@ function escapeHtml(str) {
 
   showScreen('setup');
 })();
+
+/* ─────────────────────────────────────────
+   CLASS VIEWER MODAL
+───────────────────────────────────────── */
+const CV = {
+  backdrop: $('class-viewer-backdrop'),
+  modal:    $('class-viewer-modal'),
+  input:    $('cv-class-input'),
+  datalist: $('cv-classes-datalist'),
+  searchBtn:$('cv-search-btn'),
+  clearBtn: $('cv-clear-btn'),
+  quickCls: $('cv-quick-classes'),
+  resHeader:$('cv-result-header'),
+  resTitle: $('cv-result-title'),
+  resCount: $('cv-result-count'),
+  grid:     $('cv-grid'),
+  empty:    $('cv-empty'),
+  emptyMsg: $('cv-empty-msg'),
+};
+
+function openClassViewer() {
+  CV.backdrop.classList.remove('hidden');
+  CV.modal.classList.remove('hidden');
+  // Populate datalist
+  CV.datalist.innerHTML = AppState.classes
+    .map(c => `<option value="${escapeHtml(c)}">`).join('');
+  renderCvQuickClasses();
+  setTimeout(() => CV.input.focus(), 60);
+}
+
+function closeClassViewer() {
+  CV.backdrop.classList.add('hidden');
+  CV.modal.classList.add('hidden');
+}
+
+function clearClassView() {
+  CV.input.value = '';
+  CV.grid.innerHTML = '';
+  CV.resHeader.classList.add('hidden');
+  CV.empty.classList.add('hidden');
+  CV.clearBtn.style.display = 'none';
+  CV.input.focus();
+}
+
+function onCvInputChange() {
+  // Realtime quick filter on quick-class pills
+  const q = CV.input.value.trim().toLowerCase();
+  CV.quickCls.querySelectorAll('.cv-pill').forEach(pill => {
+    const matches = !q || pill.dataset.cls.toLowerCase().includes(q);
+    pill.style.display = matches ? '' : 'none';
+  });
+}
+
+function handleCvKey(e) {
+  if (e.key === 'Enter') searchClass();
+  if (e.key === 'Escape') closeClassViewer();
+}
+
+function renderCvQuickClasses() {
+  CV.quickCls.innerHTML = '';
+  if (AppState.classes.length === 0) {
+    CV.quickCls.innerHTML = `<span style="font-size:12px;color:var(--text-muted);">No classes yet.</span>`;
+    return;
+  }
+  AppState.classes.forEach(cls => {
+    const count = Object.values(AppState.imageAnnotationMap).filter(c => c === cls).length;
+    const pill = document.createElement('button');
+    pill.className = 'cv-pill';
+    pill.dataset.cls = cls;
+    pill.title = `Show images in "${cls}"`;
+    pill.innerHTML = `<span class="cv-pill-label">${escapeHtml(cls)}</span><span class="cv-pill-count">${count}</span>`;
+    pill.onclick = () => {
+      CV.input.value = cls;
+      searchClass();
+    };
+    CV.quickCls.appendChild(pill);
+  });
+}
+
+async function searchClass() {
+  const cls = CV.input.value.trim();
+  if (!cls) { showToast('Enter a class name first', 'error'); return; }
+
+  CV.grid.innerHTML = '<div class="cv-loading">Loading…</div>';
+  CV.resHeader.classList.add('hidden');
+  CV.empty.classList.add('hidden');
+  CV.clearBtn.style.display = '';
+
+  try {
+    const data = await apiFetch('/api/class_images', {
+      method: 'POST',
+      body: JSON.stringify({ class_name: cls }),
+    });
+
+    CV.resTitle.textContent = `"${cls}"`;
+    CV.resCount.textContent = `${data.count} image${data.count !== 1 ? 's' : ''}`;
+    CV.resHeader.classList.remove('hidden');
+
+    if (data.count === 0) {
+      CV.grid.innerHTML = '';
+      CV.emptyMsg.textContent = `No images are assigned to class "${cls}".`;
+      CV.empty.classList.remove('hidden');
+      return;
+    }
+
+    renderCvGrid(data.images);
+  } catch (err) {
+    CV.grid.innerHTML = '';
+    CV.emptyMsg.textContent = err.message;
+    CV.empty.classList.remove('hidden');
+    showToast(err.message, 'error');
+  }
+}
+
+function renderCvGrid(images) {
+  CV.grid.innerHTML = '';
+  CV.empty.classList.add('hidden');
+
+  images.forEach(img => {
+    if (img.index == null) return; // safety
+
+    const card = document.createElement('div');
+    card.className = 'cv-card';
+    card.title = `${img.name}\nTrack: ${img.track_key}\nFrame: ${img.frame}`;
+    card.onclick = () => {
+      closeClassViewer();
+      goToImage(img.index);
+    };
+
+    card.innerHTML = `
+      <div class="cv-card-img-wrap">
+        <img src="/api/image/${img.index}" alt="${escapeHtml(img.name)}" loading="lazy" />
+      </div>
+      <div class="cv-card-meta">
+        <span class="cv-card-track">${escapeHtml(img.video_name || '')} · AID ${escapeHtml(String(img.aid || ''))}</span>
+        <span class="cv-card-frame">Frame ${img.frame}</span>
+      </div>
+    `;
+    CV.grid.appendChild(card);
+  });
+}
+
+// Ctrl+K shortcut to open class viewer
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    if (!AppState.loaded) return;
+    e.preventDefault();
+    const isOpen = !CV.modal.classList.contains('hidden');
+    isOpen ? closeClassViewer() : openClassViewer();
+  }
+  if (e.key === 'Escape' && !CV.modal.classList.contains('hidden')) {
+    closeClassViewer();
+  }
+});
+

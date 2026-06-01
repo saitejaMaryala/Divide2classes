@@ -424,6 +424,40 @@ def get_classes():
     return jsonify({'classes': list(state['annotations'].keys())})
 
 
+@app.route('/api/class_images', methods=['POST'])
+def get_class_images():
+    """Return images assigned to a given class, with index and track metadata."""
+    if not state['folder_path']:
+        return jsonify({'error': 'No folder loaded'}), 400
+
+    data = request.get_json()
+    class_name = (data.get('class_name') or '').strip()
+    if not class_name:
+        return jsonify({'error': 'class_name is required'}), 400
+
+    img_names = state['annotations'].get(class_name, [])
+    images_list = state['images']
+
+    result = []
+    for name in img_names:
+        idx = images_list.index(name) if name in images_list else None
+        parsed = parse_filename(name)
+        result.append({
+            'name': name,
+            'index': idx,
+            'track_key': parsed['track_key'] if parsed else None,
+            'video_name': parsed['video_name'] if parsed else None,
+            'aid': parsed['aid'] if parsed else None,
+            'frame': parsed['frame'] if parsed else None,
+        })
+
+    return jsonify({
+        'class_name': class_name,
+        'count': len(result),
+        'images': result,
+    })
+
+
 @app.route('/api/export', methods=['GET'])
 def export_annotations():
     if not state['folder_path']:

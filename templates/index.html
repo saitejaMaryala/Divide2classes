@@ -3,29 +3,29 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ImageTag — Image Annotation Tool</title>
-  <meta name="description" content="A fast, keyboard-friendly image annotation tool for classifying images into custom categories." />
+  <title>FP Analyzer — Triple-Riding False Positives</title>
+  <meta name="description" content="Analyze false positives in triple-riding detection, grouped by video track." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
-  <!-- ─── LOADING OVERLAY ─── -->
+  <!-- LOADING OVERLAY -->
   <div id="loading-overlay" class="loading-overlay hidden">
     <div class="spinner"></div>
     <p>Loading...</p>
   </div>
 
-  <!-- ─── TOAST ─── -->
+  <!-- TOAST -->
   <div id="toast" class="toast hidden"></div>
 
-  <!-- ─── HEADER ─── -->
+  <!-- HEADER -->
   <header class="app-header">
     <div class="header-left">
       <div class="logo">
-        <span class="logo-icon">⬡</span>
-        <span class="logo-text">ImageTag</span>
+        <span class="logo-icon">🏍</span>
+        <span class="logo-text">FP Analyzer</span>
       </div>
     </div>
     <div class="header-center" id="header-status" style="display:none;">
@@ -52,15 +52,13 @@
     </div>
   </header>
 
-  <!-- ═══════════════════════════════════════════════ -->
-  <!--                  SETUP SCREEN                  -->
-  <!-- ═══════════════════════════════════════════════ -->
+  <!-- SETUP SCREEN -->
   <main id="screen-setup" class="screen screen-setup active">
     <div class="setup-hero">
       <div class="setup-glow"></div>
-      <div class="hero-badge">Image Annotation Tool</div>
-      <h1 class="hero-title">Label images<br /><span class="gradient-text">blazingly fast.</span></h1>
-      <p class="hero-sub">Point to a folder. Assign classes. Export JSON. Done.</p>
+      <div class="hero-badge">Triple-Riding False Positive Analyzer</div>
+      <h1 class="hero-title">Classify FPs<br /><span class="gradient-text">by track.</span></h1>
+      <p class="hero-sub">Images grouped by video + track ID. Navigate frame-by-frame or jump between tracks.</p>
 
       <div class="setup-card">
         <label class="input-label" for="folder-path">Image Folder Path</label>
@@ -69,7 +67,8 @@
             type="text"
             id="folder-path"
             class="text-input"
-            placeholder="/home/user/my_images"
+            value="/ssd_scratch/sai.teja/tr_test_results_mod/defaultBest/fp_classified"
+            placeholder="/ssd_scratch/sai.teja/tr_test_results_mod/defaultBest/fp_classified"
             autocomplete="off"
             spellcheck="false"
           />
@@ -78,34 +77,48 @@
             Load
           </button>
         </div>
-        <p class="input-hint">Supported formats: JPG, JPEG, PNG, BMP, GIF, TIFF, WebP</p>
+        <p class="input-hint">Only images ending with <code>_3r.jpg</code> will be loaded.</p>
         <p id="setup-error" class="error-msg hidden"></p>
       </div>
 
       <div class="feature-grid">
         <div class="feature-card">
+          <span class="feature-icon">🎯</span>
+          <strong>Track Grouping</strong>
+          <span>Images grouped by video+aid pairs</span>
+        </div>
+        <div class="feature-card">
           <span class="feature-icon">⌨️</span>
           <strong>Keyboard Shortcuts</strong>
-          <span>Number keys for classes, arrows to navigate</span>
+          <span>→ next frame, Shift+→ next track</span>
         </div>
         <div class="feature-card">
-          <span class="feature-icon">💾</span>
-          <strong>Auto-Save</strong>
-          <span>Annotations saved to JSON in your folder</span>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">📊</span>
-          <strong>Dashboard View</strong>
-          <span>See annotated vs unannotated at a glance</span>
+          <span class="feature-icon">🔢</span>
+          <strong>Jump to Track</strong>
+          <span>Enter track number to jump directly</span>
         </div>
       </div>
     </div>
   </main>
 
-  <!-- ═══════════════════════════════════════════════ -->
-  <!--               ANNOTATION SCREEN                -->
-  <!-- ═══════════════════════════════════════════════ -->
+  <!-- ANNOTATION SCREEN -->
   <main id="screen-annotate" class="screen screen-annotate hidden">
+
+    <!-- Track info bar -->
+    <div class="track-info-bar" id="track-info-bar">
+      <div class="track-info-left">
+        <span class="track-badge" id="track-badge">Track — / —</span>
+        <span class="track-detail" id="track-detail">—</span>
+        <span class="track-frame-info" id="track-frame-info">Frame — of —</span>
+      </div>
+      <div class="track-jump-wrap">
+        <label class="jump-label" for="jump-input">Jump to track:</label>
+        <input type="number" id="jump-input" class="jump-input" min="1" placeholder="#" />
+        <button class="btn btn-accent btn-sm" onclick="jumpToTrack()" id="btn-jump">Go</button>
+        <span class="total-tracks-label" id="total-tracks-label">of 0 tracks</span>
+      </div>
+    </div>
+
     <div class="annotate-layout">
 
       <!-- Left panel -->
@@ -162,14 +175,22 @@
 
         <!-- Nav buttons -->
         <div class="nav-buttons">
-          <button class="nav-btn" id="btn-prev" onclick="navigate('prev')" title="Previous (←)">
+          <button class="nav-btn nav-btn-track" id="btn-prev-track" onclick="navigate('prev_track')" title="First image of previous track (Shift+←)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 18l-6-6 6-6"/><path d="M13 18l-6-6 6-6"/></svg>
+            Prev Track
+          </button>
+          <button class="nav-btn" id="btn-prev" onclick="navigate('prev')" title="Previous frame (←)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
             Prev
           </button>
           <div class="nav-counter" id="nav-counter">— / —</div>
-          <button class="nav-btn" id="btn-next" onclick="navigate('next')" title="Next (→)">
+          <button class="nav-btn" id="btn-next" onclick="navigate('next')" title="Next frame (→)">
             Next
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+          <button class="nav-btn nav-btn-track" id="btn-next-track" onclick="navigate('next_track')" title="First image of next track (Shift+→)">
+            Next Track
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 18l6-6-6-6"/><path d="M11 18l6-6-6-6"/></svg>
           </button>
         </div>
       </div>
@@ -178,16 +199,14 @@
 
     <!-- Keyboard shortcuts bar -->
     <div class="shortcuts-bar">
-      <span><kbd>←</kbd><kbd>→</kbd> Navigate</span>
+      <span><kbd>←</kbd><kbd>→</kbd> Prev/Next Frame</span>
+      <span><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd> Prev/Next Track</span>
       <span><kbd>1</kbd>–<kbd>9</kbd> Assign Class</span>
-      <span><kbd>Enter</kbd> Next Unannotated</span>
       <span><kbd>Del</kbd> Remove Label</span>
     </div>
   </main>
 
-  <!-- ═══════════════════════════════════════════════ -->
-  <!--               DASHBOARD SCREEN                 -->
-  <!-- ═══════════════════════════════════════════════ -->
+  <!-- DASHBOARD SCREEN -->
   <main id="screen-dashboard" class="screen screen-dashboard hidden">
     <div class="dashboard-header">
       <div class="dash-stats" id="dash-stats"></div>

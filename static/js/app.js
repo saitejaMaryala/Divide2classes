@@ -1,26 +1,33 @@
 /**
- * ImageTag — Main Application JavaScript
- * =======================================
- * Handles all UI interactions, API calls, navigation,
- * keyboard shortcuts, and state management.
+ * FP Analyzer — Main Application JavaScript
+ * ==========================================
+ * Track-aware navigation for triple-riding false positive annotation.
+ * - → / ← : next/prev frame within (or across) tracks
+ * - Shift+→ / Shift+← : first image of next/prev track
+ * - 1–9: assign class (no auto-advance)
+ * - Jump input: go directly to track N
  */
 
 /* ─────────────────────────────────────────
    State
 ───────────────────────────────────────── */
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
 
 const AppState = {
   loaded: false,
   totalImages: 0,
+  totalTracks: 0,
   annotatedCount: 0,
   currentIndex: 0,
   currentClass: null,
+  currentTrackKey: null,   // track_key of the currently displayed image
   classes: [],
   images: [],
+  tracks: [],
+  trackMap: {},             // track_key -> [img_name, ...]
   imageAnnotationMap: {},
   dashFilter: 'all',
-  dashPage: 1,      // current page (1-indexed)
+  dashPage: 1,
 };
 
 /* ─────────────────────────────────────────
@@ -35,36 +42,45 @@ const DOM = {
     dashboard: $('screen-dashboard'),
   },
   header: {
-    status:       $('header-status'),
-    progressBar:  $('progress-bar'),
-    progressLabel:$('progress-label'),
-    btnDashboard: $('btn-view-dashboard'),
-    btnAnnotate:  $('btn-view-annotate'),
-    btnExport:    $('btn-export'),
+    status:        $('header-status'),
+    progressBar:   $('progress-bar'),
+    progressLabel: $('progress-label'),
+    btnDashboard:  $('btn-view-dashboard'),
+    btnAnnotate:   $('btn-view-annotate'),
+    btnExport:     $('btn-export'),
   },
   setup: {
-    folderInput:  $('folder-path'),
-    error:        $('setup-error'),
+    folderInput: $('folder-path'),
+    error:       $('setup-error'),
   },
   annotate: {
-    metaFilename: $('meta-filename'),
-    metaIndex:    $('meta-index'),
-    classBadge:   $('current-class-badge'),
-    classText:    $('current-class-text'),
-    classList:    $('class-list'),
-    newClassInput:$('new-class-input'),
-    mainImage:    $('main-image'),
-    imageOverlay: $('image-overlay'),
-    overlayClass: $('overlay-class'),
-    navCounter:   $('nav-counter'),
-    btnPrev:      $('btn-prev'),
-    btnNext:      $('btn-next'),
-    btnUnannotate:$('btn-unannotate'),
+    metaFilename:  $('meta-filename'),
+    metaIndex:     $('meta-index'),
+    classBadge:    $('current-class-badge'),
+    classText:     $('current-class-text'),
+    classList:     $('class-list'),
+    newClassInput: $('new-class-input'),
+    mainImage:     $('main-image'),
+    imageOverlay:  $('image-overlay'),
+    overlayClass:  $('overlay-class'),
+    navCounter:    $('nav-counter'),
+    btnPrev:       $('btn-prev'),
+    btnNext:       $('btn-next'),
+    btnPrevTrack:  $('btn-prev-track'),
+    btnNextTrack:  $('btn-next-track'),
+    btnUnannotate: $('btn-unannotate'),
+  },
+  trackBar: {
+    badge:         $('track-badge'),
+    detail:        $('track-detail'),
+    frameInfo:     $('track-frame-info'),
+    jumpInput:     $('jump-input'),
+    totalLabel:    $('total-tracks-label'),
   },
   dashboard: {
-    stats:     $('dash-stats'),
-    grid:      $('image-grid'),
-    empty:     $('dash-empty'),
+    stats: $('dash-stats'),
+    grid:  $('image-grid'),
+    empty: $('dash-empty'),
   },
   loadingOverlay: $('loading-overlay'),
   toast:          $('toast'),
@@ -112,10 +128,10 @@ function showScreen(name) {
   });
 
   const loaded = AppState.loaded;
-  DOM.header.btnDashboard.style.display  = (loaded && name !== 'dashboard')  ? '' : 'none';
-  DOM.header.btnAnnotate.style.display   = (loaded && name !== 'annotate')   ? '' : 'none';
-  DOM.header.btnExport.style.display     = loaded ? '' : 'none';
-  DOM.header.status.style.display        = loaded ? '' : 'none';
+  DOM.header.btnDashboard.style.display = (loaded && name !== 'dashboard') ? '' : 'none';
+  DOM.header.btnAnnotate.style.display  = (loaded && name !== 'annotate')  ? '' : 'none';
+  DOM.header.btnExport.style.display    = loaded ? '' : 'none';
+  DOM.header.status.style.display       = loaded ? '' : 'none';
 }
 
 /* ─────────────────────────────────────────
@@ -128,6 +144,29 @@ function updateProgress() {
   DOM.header.progressBar.style.width = pct + '%';
   DOM.header.progressLabel.textContent =
     `${AppState.annotatedCount} / ${AppState.totalImages}`;
+}
+
+/* ─────────────────────────────────────────
+   Track Info Bar
+───────────────────────────────────────── */
+function updateTrackBar(info) {
+  // info: { track_key, track_index (0-based), track_size, track_all_frames, pos_in_track, frame, video_name, aid, index, total, total_tracks }
+  if (!info || info.track_key == null) return;
+
+  const trackNum = info.track_index + 1;  // 1-based for display
+  const total    = info.total_tracks;
+
+  DOM.trackBar.badge.textContent  = `Track ${trackNum} / ${total}`;
+  DOM.trackBar.detail.textContent = `📹 ${info.video_name}  •  AID: ${info.aid}`;
+
+  const allFrames = info.track_all_frames ?? info.track_size;
+  DOM.trackBar.frameInfo.textContent =
+    `3r crop ${info.pos_in_track} of ${info.track_size}  |  frame# ${info.frame}  |  ${allFrames} total frames in track`;
+
+  DOM.trackBar.totalLabel.textContent = `of ${total} tracks`;
+
+  // Update nav counter
+  DOM.annotate.navCounter.textContent = `${info.index + 1} / ${info.total}`;
 }
 
 /* ─────────────────────────────────────────
@@ -149,15 +188,15 @@ async function loadFolder() {
       body: JSON.stringify({ folder_path: path }),
     });
 
-    AppState.loaded = true;
+    AppState.loaded      = true;
     AppState.totalImages = data.total;
-    AppState.currentIndex = data.current_index;
+    AppState.totalTracks = data.total_tracks;
+    AppState.currentIndex = 0;
 
-    // Fetch full status
     await refreshStatus();
 
     showScreen('annotate');
-    await loadImageAtIndex(AppState.currentIndex);
+    await loadImageAtIndex(0);
   } catch (err) {
     showSetupError(err.message);
   } finally {
@@ -171,21 +210,28 @@ function showSetupError(msg) {
 }
 
 /* ─────────────────────────────────────────
-   REFRESH STATUS (global state sync)
+   REFRESH STATUS
 ───────────────────────────────────────── */
 async function refreshStatus() {
   const data = await apiFetch('/api/status');
   if (!data.loaded) return;
 
   AppState.totalImages       = data.total;
+  AppState.totalTracks       = data.total_tracks;
   AppState.annotatedCount    = data.annotated;
   AppState.currentIndex      = data.current_index;
   AppState.classes           = data.classes || [];
-  AppState.images            = data.images || [];
+  AppState.images            = data.images  || [];
+  AppState.tracks            = data.tracks  || [];
+  AppState.trackMap          = data.track_map || {};
   AppState.imageAnnotationMap = data.image_annotation_map || {};
 
   updateProgress();
   renderClassList();
+
+  // Keep jump input max in sync
+  DOM.trackBar.totalLabel.textContent = `of ${AppState.totalTracks} tracks`;
+  DOM.trackBar.jumpInput.max = AppState.totalTracks;
 }
 
 /* ─────────────────────────────────────────
@@ -207,12 +253,15 @@ async function loadImageAtIndex(index) {
     // Update meta
     DOM.annotate.metaFilename.textContent = info.name;
     DOM.annotate.metaIndex.textContent    = `Image ${index + 1} of ${info.total}`;
-    DOM.annotate.navCounter.textContent   = `${index + 1} / ${info.total}`;
 
-    // Update class badge
+    // Track bar
+    updateTrackBar(info);
+    AppState.currentTrackKey = info.track_key || null;
+
+    // Class badge
     updateClassBadge(info.class);
 
-    // Update overlay
+    // Overlay
     if (info.class) {
       DOM.annotate.overlayClass.textContent = info.class;
       DOM.annotate.imageOverlay.classList.remove('hidden');
@@ -224,8 +273,10 @@ async function loadImageAtIndex(index) {
     DOM.annotate.btnUnannotate.style.display = info.class ? '' : 'none';
 
     // Nav button states
-    DOM.annotate.btnPrev.disabled = (index === 0);
-    DOM.annotate.btnNext.disabled = (index === AppState.totalImages - 1);
+    DOM.annotate.btnPrev.disabled      = (index === 0);
+    DOM.annotate.btnNext.disabled      = (index === AppState.totalImages - 1);
+    DOM.annotate.btnPrevTrack.disabled = (info.track_index === 0);
+    DOM.annotate.btnNextTrack.disabled = (info.track_index === AppState.totalTracks - 1);
 
     renderClassList();
   } catch (err) {
@@ -277,7 +328,7 @@ function renderClassList() {
 }
 
 /* ─────────────────────────────────────────
-   ASSIGN CLASS
+   ASSIGN CLASS  (no auto-advance)
 ───────────────────────────────────────── */
 async function assignClass(className) {
   try {
@@ -291,7 +342,6 @@ async function assignClass(className) {
 
     // Update imageAnnotationMap locally
     const imgName = AppState.images[AppState.currentIndex];
-    // Clear old assignment
     Object.keys(AppState.imageAnnotationMap).forEach(k => {
       if (AppState.imageAnnotationMap[k] === imgName) delete AppState.imageAnnotationMap[k];
     });
@@ -309,15 +359,7 @@ async function assignClass(className) {
     showToast(`✓ Labeled as "${className}"`, 'success');
     renderClassList();
 
-    // Auto-advance to next unannotated
-    if (data.next_unannotated !== null && data.next_unannotated !== undefined) {
-      setTimeout(() => loadImageAtIndex(data.next_unannotated), 280);
-    } else {
-      // All annotated — check if this was the last
-      if (data.annotated === data.total) {
-        showToast('🎉 All images annotated!', 'success');
-      }
-    }
+    // No auto-advance — user navigates manually
 
   } catch (err) {
     showToast(err.message, 'error');
@@ -337,7 +379,6 @@ async function addClass() {
     return;
   }
 
-  // Optimistically add and assign immediately
   AppState.classes.push(name);
   renderClassList();
   input.value = '';
@@ -378,17 +419,46 @@ async function unannotateImage() {
 }
 
 /* ─────────────────────────────────────────
+   NEW TRACK BANNER
+───────────────────────────────────────── */
+let _bannerTimer = null;
+function showNewTrackBanner(info) {
+  let banner = document.getElementById('new-track-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'new-track-banner';
+    banner.className = 'new-track-banner';
+    document.body.appendChild(banner);
+  }
+
+  const trackNum = (info.track_index ?? 0) + 1;
+  banner.innerHTML = `
+    <span class="ntb-pill">New Track</span>
+    <span class="ntb-info">Track ${trackNum} of ${info.total_tracks} &nbsp;•&nbsp; AID: <strong>${info.aid}</strong> &nbsp;•&nbsp; ${info.video_name}</span>
+  `;
+  banner.classList.add('visible');
+  clearTimeout(_bannerTimer);
+  _bannerTimer = setTimeout(() => banner.classList.remove('visible'), 2800);
+}
+
+/* ─────────────────────────────────────────
    NAVIGATION
 ───────────────────────────────────────── */
 async function navigate(direction) {
   try {
+    const prevTrackKey = AppState.currentTrackKey;
+
     const data = await apiFetch('/api/navigate', {
       method: 'POST',
       body: JSON.stringify({ direction }),
     });
 
-    if (data.all_done) {
-      showToast('🎉 All images are annotated!', 'success');
+    if (data.at_end) {
+      showToast('Already at last track', 'error');
+      return;
+    }
+    if (data.at_start) {
+      showToast('Already at first track', 'error');
       return;
     }
 
@@ -396,6 +466,39 @@ async function navigate(direction) {
     AppState.currentClass = data.class || null;
 
     await loadImageAtIndex(data.index);
+
+    // Show banner only when frame-level nav (next/prev) crosses a track boundary
+    if ((direction === 'next' || direction === 'prev') &&
+        data.track_key && data.track_key !== prevTrackKey) {
+      showNewTrackBanner(data);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+/* ─────────────────────────────────────────
+   JUMP TO TRACK
+───────────────────────────────────────── */
+async function jumpToTrack() {
+  const val = parseInt(DOM.trackBar.jumpInput.value, 10);
+  if (isNaN(val) || val < 1 || val > AppState.totalTracks) {
+    showToast(`Enter a number between 1 and ${AppState.totalTracks}`, 'error');
+    return;
+  }
+
+  try {
+    const data = await apiFetch('/api/navigate', {
+      method: 'POST',
+      body: JSON.stringify({ direction: 'goto_track', track_index: val }),
+    });
+
+    AppState.currentIndex = data.index;
+    AppState.currentClass = data.class || null;
+    DOM.trackBar.jumpInput.value = '';
+
+    await loadImageAtIndex(data.index);
+    showToast(`Jumped to track ${val}`, 'success');
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -405,19 +508,22 @@ async function navigate(direction) {
    DASHBOARD
 ───────────────────────────────────────── */
 async function openDashboard() {
-  AppState.dashPage = 1;   // always start at page 1
+  AppState.dashPage = 1;
   await refreshStatus();
   renderDashboard();
   showScreen('dashboard');
 }
 
 function renderDashboard() {
-  // Stats
   const unannotated = AppState.totalImages - AppState.annotatedCount;
   DOM.dashboard.stats.innerHTML = `
     <div class="stat-block">
       <span class="stat-value stat-accent">${AppState.totalImages}</span>
-      <span class="stat-label">Total</span>
+      <span class="stat-label">Total Images</span>
+    </div>
+    <div class="stat-block">
+      <span class="stat-value stat-purple">${AppState.totalTracks}</span>
+      <span class="stat-label">Tracks</span>
     </div>
     <div class="stat-block">
       <span class="stat-value stat-green">${AppState.annotatedCount}</span>
@@ -428,8 +534,6 @@ function renderDashboard() {
       <span class="stat-label">Remaining</span>
     </div>
   `;
-
-  // Grid
   renderGrid(AppState.dashFilter);
 }
 
@@ -452,14 +556,10 @@ function renderGrid(filter) {
   }
   DOM.dashboard.empty.classList.add('hidden');
 
-  // ── Pagination ──
-  const totalItems = items.length;
-  const totalPages = Math.ceil(totalItems / PAGE_SIZE);
-
-  // Clamp current page within valid range
+  const totalPages = Math.ceil(items.length / PAGE_SIZE);
   AppState.dashPage = Math.max(1, Math.min(AppState.dashPage, totalPages));
 
-  const start = (AppState.dashPage - 1) * PAGE_SIZE;
+  const start     = (AppState.dashPage - 1) * PAGE_SIZE;
   const pageItems = items.slice(start, start + PAGE_SIZE);
 
   pageItems.forEach(({ name, idx, cls }) => {
@@ -486,20 +586,17 @@ function renderGrid(filter) {
 }
 
 /* ─────────────────────────────────────────
-   PAGINATION CONTROLS
+   PAGINATION
 ───────────────────────────────────────── */
 function renderPagination(currentPage, totalPages) {
-  // Remove old pagination if exists
   const existing = document.getElementById('dash-pagination');
   if (existing) existing.remove();
-
   if (totalPages <= 1) return;
 
   const nav = document.createElement('div');
   nav.id = 'dash-pagination';
   nav.className = 'pagination';
 
-  // Prev button
   const prevBtn = document.createElement('button');
   prevBtn.className = 'page-btn page-nav';
   prevBtn.textContent = '← Prev';
@@ -507,14 +604,12 @@ function renderPagination(currentPage, totalPages) {
   prevBtn.onclick = () => goToPage(currentPage - 1);
   nav.appendChild(prevBtn);
 
-  // Page number buttons (show at most 7 around current)
-  const pages = buildPageNumbers(currentPage, totalPages);
-  pages.forEach(p => {
+  buildPageNumbers(currentPage, totalPages).forEach(p => {
     if (p === '...') {
-      const ellipsis = document.createElement('span');
-      ellipsis.className = 'page-ellipsis';
-      ellipsis.textContent = '…';
-      nav.appendChild(ellipsis);
+      const el = document.createElement('span');
+      el.className = 'page-ellipsis';
+      el.textContent = '…';
+      nav.appendChild(el);
     } else {
       const btn = document.createElement('button');
       btn.className = 'page-btn' + (p === currentPage ? ' active' : '');
@@ -524,7 +619,6 @@ function renderPagination(currentPage, totalPages) {
     }
   });
 
-  // Next button
   const nextBtn = document.createElement('button');
   nextBtn.className = 'page-btn page-nav';
   nextBtn.textContent = 'Next →';
@@ -532,13 +626,11 @@ function renderPagination(currentPage, totalPages) {
   nextBtn.onclick = () => goToPage(currentPage + 1);
   nav.appendChild(nextBtn);
 
-  // Page counter label
   const label = document.createElement('span');
   label.className = 'page-info';
   label.textContent = `Page ${currentPage} of ${totalPages}`;
   nav.appendChild(label);
 
-  // Insert after the grid
   DOM.dashboard.grid.after(nav);
 }
 
@@ -560,13 +652,12 @@ function buildPageNumbers(current, total) {
 function goToPage(page) {
   AppState.dashPage = page;
   renderGrid(AppState.dashFilter);
-  // Scroll grid back to top
   document.getElementById('screen-dashboard').scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function filterDashboard(filter, btn) {
   AppState.dashFilter = filter;
-  AppState.dashPage = 1;   // reset to first page on filter change
+  AppState.dashPage = 1;
   document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderGrid(filter);
@@ -579,24 +670,8 @@ async function goToImage(index) {
 }
 
 async function startAnnotating() {
-  // Navigate to first unannotated
-  try {
-    const data = await apiFetch('/api/navigate', {
-      method: 'POST',
-      body: JSON.stringify({ direction: 'next_unannotated' }),
-    });
-
-    if (data.all_done) {
-      showToast('🎉 All images are already annotated!', 'success');
-      return;
-    }
-
-    AppState.currentIndex = data.index;
-    showScreen('annotate');
-    await loadImageAtIndex(data.index);
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
+  showScreen('annotate');
+  await loadImageAtIndex(AppState.currentIndex);
 }
 
 /* ─────────────────────────────────────────
@@ -622,22 +697,24 @@ async function exportAnnotations() {
    KEYBOARD SHORTCUTS
 ───────────────────────────────────────── */
 document.addEventListener('keydown', async (e) => {
-  // Ignore when typing in inputs
   if (['INPUT', 'TEXTAREA'].includes(e.target.tagName)) return;
 
   const currentScreen = Object.entries(DOM.screens)
     .find(([, el]) => el.classList.contains('active'))?.[0];
 
   if (currentScreen === 'annotate') {
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    if (e.key === 'ArrowRight' && e.shiftKey) {
+      e.preventDefault();
+      navigate('next_track');
+    } else if (e.key === 'ArrowLeft' && e.shiftKey) {
+      e.preventDefault();
+      navigate('prev_track');
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
       e.preventDefault();
       navigate('next');
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       e.preventDefault();
       navigate('prev');
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      navigate('next_unannotated');
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       if (AppState.currentClass) {
         e.preventDefault();
@@ -653,10 +730,13 @@ document.addEventListener('keydown', async (e) => {
   }
 
   if (currentScreen === 'setup') {
-    if (e.key === 'Enter') {
-      loadFolder();
-    }
+    if (e.key === 'Enter') loadFolder();
   }
+});
+
+// Jump input: Enter to jump
+DOM.trackBar.jumpInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') jumpToTrack();
 });
 
 /* ─────────────────────────────────────────
@@ -666,9 +746,6 @@ DOM.header.btnDashboard.onclick = openDashboard;
 DOM.header.btnAnnotate.onclick  = () => showScreen('annotate');
 DOM.header.btnExport.onclick    = exportAnnotations;
 
-/* ─────────────────────────────────────────
-   SETUP SCREEN — Enter key
-───────────────────────────────────────── */
 DOM.setup.folderInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') loadFolder();
 });
@@ -686,16 +763,18 @@ function escapeHtml(str) {
    INIT
 ───────────────────────────────────────── */
 (async function init() {
-  // Check if there's already a loaded session
   try {
     const data = await apiFetch('/api/status');
     if (data.loaded && data.total > 0) {
-      AppState.loaded         = true;
-      AppState.totalImages    = data.total;
-      AppState.annotatedCount = data.annotated;
-      AppState.currentIndex   = data.current_index;
-      AppState.classes        = data.classes;
-      AppState.images         = data.images;
+      AppState.loaded          = true;
+      AppState.totalImages     = data.total;
+      AppState.totalTracks     = data.total_tracks;
+      AppState.annotatedCount  = data.annotated;
+      AppState.currentIndex    = data.current_index;
+      AppState.classes         = data.classes;
+      AppState.images          = data.images;
+      AppState.tracks          = data.tracks;
+      AppState.trackMap        = data.track_map;
       AppState.imageAnnotationMap = data.image_annotation_map;
 
       updateProgress();

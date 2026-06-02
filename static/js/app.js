@@ -21,6 +21,11 @@ const AppState = {
   imageAnnotationMap: {},
   dashFilter: 'all',
   dashPage: 1,      // current page (1-indexed)
+  // ── Browse-by-class mode ──
+  browseMode: false,
+  browseClassName: null,
+  browseImages: [],      // [{index, name}, ...] ordered
+  browsePosIndex: 0,     // position within browseImages
 };
 
 /* ─────────────────────────────────────────
@@ -68,6 +73,11 @@ const DOM = {
   },
   loadingOverlay: $('loading-overlay'),
   toast:          $('toast'),
+  classBrowserModal: $('class-browser-modal'),
+  modalClassList:    $('modal-class-list'),
+  browseBanner:      $('class-browse-banner'),
+  browseClassName:   $('browse-class-name'),
+  browsePos:         $('browse-pos'),
 };
 
 /* ─────────────────────────────────────────
@@ -207,7 +217,24 @@ async function loadImageAtIndex(index) {
     // Update meta
     DOM.annotate.metaFilename.textContent = info.name;
     DOM.annotate.metaIndex.textContent    = `Image ${index + 1} of ${info.total}`;
-    DOM.annotate.navCounter.textContent   = `${index + 1} / ${info.total}`;
+
+    // Counter — in browse mode show filtered position
+    if (AppState.browseMode) {
+      // Sync browsePosIndex to the loaded index
+      const pos = AppState.browseImages.findIndex(x => x.index === index);
+      if (pos !== -1) AppState.browsePosIndex = pos;
+      DOM.annotate.navCounter.textContent =
+        `${AppState.browsePosIndex + 1} / ${AppState.browseImages.length} (${AppState.browseClassName})`;
+      // Nav button states within the browse list
+      DOM.annotate.btnPrev.disabled = (AppState.browsePosIndex === 0);
+      DOM.annotate.btnNext.disabled = (AppState.browsePosIndex === AppState.browseImages.length - 1);
+      DOM.browseBanner.querySelector('#browse-pos').textContent =
+        `${AppState.browsePosIndex + 1} / ${AppState.browseImages.length}`;
+    } else {
+      DOM.annotate.navCounter.textContent   = `${index + 1} / ${info.total}`;
+      DOM.annotate.btnPrev.disabled = (index === 0);
+      DOM.annotate.btnNext.disabled = (index === AppState.totalImages - 1);
+    }
 
     // Update class badge
     updateClassBadge(info.class);
@@ -222,10 +249,6 @@ async function loadImageAtIndex(index) {
 
     // Unannotate button
     DOM.annotate.btnUnannotate.style.display = info.class ? '' : 'none';
-
-    // Nav button states
-    DOM.annotate.btnPrev.disabled = (index === 0);
-    DOM.annotate.btnNext.disabled = (index === AppState.totalImages - 1);
 
     renderClassList();
   } catch (err) {
@@ -381,6 +404,12 @@ async function unannotateImage() {
    NAVIGATION
 ───────────────────────────────────────── */
 async function navigate(direction) {
+  // In browse mode, intercept next/prev to stay within the class
+  if (AppState.browseMode && (direction === 'next' || direction === 'prev')) {
+    await navigateInClass(direction);
+    return;
+  }
+
   try {
     const data = await apiFetch('/api/navigate', {
       method: 'POST',
@@ -399,6 +428,104 @@ async function navigate(direction) {
   } catch (err) {
     showToast(err.message, 'error');
   }
+}
+
+/* ─────────────────────────────────────────
+   CLASS BROWSER
+───────────────────────────────────────── */
+function openClassBrowser() {
+  const modal = DOM.classBrowserModal;
+  const list  = DOM.modalClassList;
+  list.innerHTML = '';
+
+  if (AppState.classes.length === 0) {
+    list.innerHTML = '<p class="modal-empty">No classes annotated yet.</p>';
+  } else {
+    AppState.classes.forEach(cls => {
+      const count = Object.values(AppState.imageAnnotationMap).filter(c => c === cls).length;
+      const isActive = AppState.browseMode && AppState.browseClassName === cls;
+
+      const btn = document.createElement('button');
+      btn.className = 'modal-class-btn' + (isActive ? ' active' : '');
+      btn.onclick = () => selectBrowseClass(cls);
+      btn.innerHTML = `
+        <span class="modal-cls-label">${escapeHtml(cls)}</span>
+        <span class="modal-cls-count">${count} image${count !== 1 ? 's' : ''}</span>
+        ${isActive ? '<span class="modal-cls-active-tag">Active</span>' : ''}
+      `;
+      list.appendChild(btn);
+    });
+  }
+
+  modal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeClassBrowserModal(event) {
+  // Close on backdrop click (not on modal-box click)
+  if (event && event.target !== DOM.classBrowserModal) return;
+  DOM.classBrowserModal.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+async function selectBrowseClass(className) {
+  DOM.classBrowserModal.classList.add('hidden');
+  document.body.style.overflow = '';
+
+  setLoading(true);
+  try {
+    const data = await apiFetch(`/api/class_images/${encodeURIComponent(className)}`);
+    if (!data.images || data.images.length === 0) {
+      showToast(`No images in class "${className}"`, 'error');
+      return;
+    }
+
+    AppState.browseMode      = true;
+    AppState.browseClassName = className;
+    AppState.browseImages    = data.images;
+    AppState.browsePosIndex  = 0;
+
+    // Show banner
+    DOM.browseClassName.textContent = className;
+    DOM.browseBanner.classList.remove('hidden');
+
+    // Jump to first image in class
+    await loadImageAtIndex(data.images[0].index);
+    showToast(`Browsing "${className}" — ${data.images.length} image${data.images.length !== 1 ? 's' : ''}`, 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function navigateInClass(direction) {
+  const list = AppState.browseImages;
+  if (!list.length) return;
+
+  let pos = AppState.browsePosIndex;
+  if (direction === 'next') pos = Math.min(pos + 1, list.length - 1);
+  else                      pos = Math.max(pos - 1, 0);
+
+  AppState.browsePosIndex = pos;
+  await loadImageAtIndex(list[pos].index);
+}
+
+function clearClassBrowse() {
+  AppState.browseMode      = false;
+  AppState.browseClassName = null;
+  AppState.browseImages    = [];
+  AppState.browsePosIndex  = 0;
+
+  DOM.browseBanner.classList.add('hidden');
+
+  // Restore normal nav button states
+  const idx = AppState.currentIndex;
+  DOM.annotate.btnPrev.disabled = (idx === 0);
+  DOM.annotate.btnNext.disabled = (idx === AppState.totalImages - 1);
+  DOM.annotate.navCounter.textContent = `${idx + 1} / ${AppState.totalImages}`;
+
+  showToast('Browse mode cleared', '');
 }
 
 /* ─────────────────────────────────────────

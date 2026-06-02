@@ -282,6 +282,23 @@ def get_classes():
     return jsonify({'classes': list(state['annotations'].keys())})
 
 
+@app.route('/api/class_images/<path:class_name>', methods=['GET'])
+def get_class_images(class_name):
+    """Return ordered list of images assigned to the given class."""
+    if not state['folder_path']:
+        return jsonify({'error': 'No folder loaded'}), 400
+
+    img_names = state['annotations'].get(class_name, [])
+    # Return with their global indices so the front-end can navigate to them
+    result = []
+    for name in img_names:
+        if name in state['images']:
+            result.append({'index': state['images'].index(name), 'name': name})
+    # Sort by global index so they appear in folder order
+    result.sort(key=lambda x: x['index'])
+    return jsonify({'class_name': class_name, 'images': result})
+
+
 @app.route('/api/export', methods=['GET'])
 def export_annotations():
     if not state['folder_path']:

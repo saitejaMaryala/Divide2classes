@@ -42,13 +42,14 @@ const DOM = {
     dashboard: $('screen-dashboard'),
   },
   header: {
-    status:        $('header-status'),
-    progressBar:   $('progress-bar'),
-    progressLabel: $('progress-label'),
-    btnDashboard:  $('btn-view-dashboard'),
-    btnAnnotate:   $('btn-view-annotate'),
-    btnExport:     $('btn-export'),
-    btnClassViewer: $('btn-class-viewer'),
+    status:           $('header-status'),
+    progressBar:      $('progress-bar'),
+    progressLabel:    $('progress-label'),
+    btnDashboard:     $('btn-view-dashboard'),
+    btnAnnotate:      $('btn-view-annotate'),
+    btnExport:        $('btn-export'),
+    btnClassViewer:   $('btn-class-viewer'),
+    btnChangeFolder:  $('btn-change-folder'),
   },
   setup: {
     folderInput: $('folder-path'),
@@ -129,10 +130,12 @@ function showScreen(name) {
   });
 
   const loaded = AppState.loaded;
+  const notSetup = name !== 'setup';
   DOM.header.btnDashboard.style.display    = (loaded && name !== 'dashboard') ? '' : 'none';
   DOM.header.btnAnnotate.style.display     = (loaded && name !== 'annotate')  ? '' : 'none';
   DOM.header.btnExport.style.display       = loaded ? '' : 'none';
   DOM.header.btnClassViewer.style.display  = loaded ? '' : 'none';
+  DOM.header.btnChangeFolder.style.display = (loaded && notSetup) ? '' : 'none';
   DOM.header.status.style.display          = loaded ? '' : 'none';
 }
 
@@ -751,6 +754,36 @@ DOM.header.btnExport.onclick    = exportAnnotations;
 DOM.setup.folderInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') loadFolder();
 });
+
+/* ─────────────────────────────────────────
+   CHANGE FOLDER
+───────────────────────────────────────── */
+async function changeFolder() {
+  try {
+    await apiFetch('/api/reset', { method: 'POST' });
+  } catch (_) {}
+
+  // Reset client state
+  AppState.loaded            = false;
+  AppState.totalImages       = 0;
+  AppState.totalTracks       = 0;
+  AppState.annotatedCount    = 0;
+  AppState.currentIndex      = 0;
+  AppState.currentClass      = null;
+  AppState.currentTrackKey   = null;
+  AppState.classes           = [];
+  AppState.images            = [];
+  AppState.tracks            = [];
+  AppState.trackMap          = {};
+  AppState.imageAnnotationMap = {};
+
+  // Clear the folder input so user types a fresh path
+  DOM.setup.folderInput.value = '';
+  DOM.setup.error.classList.add('hidden');
+
+  showScreen('setup');
+  setTimeout(() => DOM.setup.folderInput.focus(), 80);
+}
 
 /* ─────────────────────────────────────────
    Utility: escape HTML

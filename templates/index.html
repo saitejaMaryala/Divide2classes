@@ -53,6 +53,10 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         Class View
       </button>
+      <button class="btn btn-ghost btn-change-folder" id="btn-change-folder" style="display:none;" title="Load a different folder" onclick="changeFolder()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+        Change Folder
+      </button>
     </div>
   </header>
 
@@ -71,8 +75,8 @@
             type="text"
             id="folder-path"
             class="text-input"
-            value="/ssd_scratch/sai.teja/tr_test_results_mod/defaultBest/fp_classified"
-            placeholder="/ssd_scratch/sai.teja/tr_test_results_mod/defaultBest/fp_classified"
+            value=""
+            placeholder="/path/to/your/image/folder"
             autocomplete="off"
             spellcheck="false"
           />

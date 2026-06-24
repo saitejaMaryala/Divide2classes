@@ -8,7 +8,6 @@ app = Flask(__name__)
 
 SUPPORTED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif', '.tiff', '.webp'}
 ANNOTATIONS_FILENAME = 'annotations.json'
-DEFAULT_FOLDER = '/ssd_scratch/sai.teja/tr_test_results_mod/defaultBest/fp_classified'
 
 # In-memory state
 state = {
@@ -465,6 +464,19 @@ def export_annotations():
     return jsonify(state['annotations'])
 
 
+@app.route('/api/reset', methods=['POST'])
+def reset_state():
+    """Clear all in-memory state so the user can load a different folder."""
+    state['folder_path']     = None
+    state['images']          = []
+    state['tracks']          = []
+    state['track_map']       = {}
+    state['track_all_count'] = {}
+    state['annotations']     = {}
+    state['current_index']   = 0
+    return jsonify({'success': True})
+
+
 def _auto_load(folder_path):
     """Load a folder at startup so the UI skips the setup screen."""
     if not os.path.isdir(folder_path):
@@ -509,5 +521,4 @@ def _auto_load(folder_path):
 
 
 if __name__ == '__main__':
-    _auto_load(DEFAULT_FOLDER)
     app.run(host='0.0.0.0', debug=True, port=5002)
